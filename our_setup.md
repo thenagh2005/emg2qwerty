@@ -13,6 +13,13 @@ uclac147 is the project name
 
 4. In VS Code, click on "Open a Remote Window" in the bottom left. Then, "Connect to Host". There should be a host starting with "instance-2"
 
+Aside: if you have issues connecting, it could be that the IP changed.
+In that case,
+```
+nano ~/.ssh/config 
+```
+and change the IP in the Google Compute Engine section to match the external IP of the [VM instance](https://console.cloud.google.com/compute/instances). 
+
 5. At top of train.py add
 ```
 import torch
