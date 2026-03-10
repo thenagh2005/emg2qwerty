@@ -373,3 +373,41 @@ class LSTMEncoder(nn.Module):
         lstm_out, _ = self.lstm(inputs)  
         out = self.projection(lstm_out)  
         return out
+
+###Recurrent block with GRU
+
+class RNNLayer(nn.Module):
+    def __init__(self, in_size: int, hidden_size: int, num_layers:int, out_ll_size: int = 384):
+        super().__init__()
+        self.rnn = nn.GRU(input_size=in_size, hidden_size=hidden_size, num_layers=num_layers, bidirectional=True)
+        
+        self.norm = nn.LayerNorm(hidden_size * 2)  # bidirectional GRU doubles hidden size
+        
+        self.dropout = nn.Dropout(0.6)  # Increased dropout rate to 0.6
+        self.mid_layer = nn.Linear(hidden_size * 2, out_ll_size)
+        self.relu = nn.ReLU()
+        self.fc = nn.Linear(out_ll_size, charset().num_classes)
+        self.log_softmax = nn.LogSoftmax(dim=-1)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x shape: (T, N, in_size)
+        # x, _ = self.rnn(x)  # (T, N, hidden_size*2)
+        # x = self.fc(x)      # (T, N, num_classes)
+        #print(f'Input to RNN: {x.shape}')
+        x, _ = self.rnn(x)  
+        
+        
+        
+        """""
+        This part of the code is generated with the help of ChatGPT
+        """""
+        x = self.norm(x)
+        x = self.dropout(x)
+        
+        #print(f'Shape after GRU: {x.shape}') # (T, N, hidden_size*2)
+        #x = self.mid_layer(x) 
+        #print(f'Shape after mid layer: {x.shape}')              # (T, N, mid_layer_size)
+        x = self.relu(self.mid_layer(x))                # (T, N, mid_fc_size)
+        x = self.fc(x) 
+        #print(f'Shape before softmax: {x.shape}')          # (T, N, num_classes)  
+        return self.log_softmax(x)
