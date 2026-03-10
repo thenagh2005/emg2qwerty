@@ -278,3 +278,98 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+class TCNResidualBlock(nn.Module):
+    def __init__(
+        self, 
+        num_features: int, # channels
+        kernel_size: int = 3, # how many timestamps
+        dilation: int = 1,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        
+        # Non-causal padding
+        self.padding = ((kernel_size - 1) * dilation) // 2
+        
+        # First layer
+        self.conv1 = nn.utils.weight_norm(nn.Conv1d(num_features, num_features, kernel_size, padding=self.padding, dilation=dilation))
+        self.gn1 = nn.GroupNorm(1, num_features)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+        
+        # Second layer  
+        self.conv2 = nn.utils.weight_norm(nn.Conv1d(num_features, num_features, kernel_size,padding=self.padding, dilation=dilation))
+        self.gn2 = nn.GroupNorm(1, num_features)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(1, 2, 0)
+        residual = x
+        
+        # First conv 
+        out = self.conv1(x)
+        out = self.gn1(out)
+        out = self.relu1(out)
+        out = self.dropout1(out)
+        
+        # Second conv 
+        out = self.conv2(out)
+        out = self.gn2(out)
+        out = self.relu2(out)
+        out = self.dropout2(out)
+        
+        out = out + residual
+        return out.permute(2, 0, 1) 
+
+# stacks blocks
+class TCNEncoder(nn.Module):    
+    def __init__(
+        self,
+        num_features: int,
+        num_blocks: int = 4,
+        kernel_size: int = 3,
+        dilation_base: int = 2,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        
+        blocks = []
+        for i in range(num_blocks):
+            dilation = dilation_base ** i  
+            blocks.append(
+                TCNResidualBlock(num_features=num_features, kernel_size=kernel_size, dilation=dilation, dropout=dropout)
+            )
+        
+        self.blocks = nn.Sequential(*blocks)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.blocks(inputs)
+
+class LSTMEncoder(nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        hidden_size: int = 256,
+        num_layers: int = 2,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        
+        self.lstm = nn.LSTM(
+            input_size=num_features,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            batch_first=False, 
+            bidirectional=True,
+        )
+        
+        self.projection = nn.Linear(hidden_size * 2, num_features)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        lstm_out, _ = self.lstm(inputs)  
+        out = self.projection(lstm_out)  
+        return out
