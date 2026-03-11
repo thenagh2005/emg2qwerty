@@ -278,3 +278,210 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+class TCNResidualBlock(nn.Module):
+    def __init__(
+        self, 
+        num_features: int, # channels
+        kernel_size: int = 3, # how many timestamps
+        dilation: int = 1,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        
+        # Non-causal padding
+        self.padding = ((kernel_size - 1) * dilation) // 2
+        
+        # First layer
+        self.conv1 = nn.utils.weight_norm(nn.Conv1d(num_features, num_features, kernel_size, padding=self.padding, dilation=dilation))
+        self.gn1 = nn.GroupNorm(1, num_features)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+        
+        # Second layer  
+        self.conv2 = nn.utils.weight_norm(nn.Conv1d(num_features, num_features, kernel_size,padding=self.padding, dilation=dilation))
+        self.gn2 = nn.GroupNorm(1, num_features)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(1, 2, 0)
+        residual = x
+        
+        # First conv 
+        out = self.conv1(x)
+        out = self.gn1(out)
+        out = self.relu1(out)
+        out = self.dropout1(out)
+        
+        # Second conv 
+        out = self.conv2(out)
+        out = self.gn2(out)
+        out = self.relu2(out)
+        out = self.dropout2(out)
+        
+        out = out + residual
+        return out.permute(2, 0, 1) 
+
+# stacks blocks
+class TCNEncoder(nn.Module):    
+    def __init__(
+        self,
+        num_features: int,
+        num_blocks: int = 4,
+        kernel_size: int = 3,
+        dilation_base: int = 2,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        
+        blocks = []
+        for i in range(num_blocks):
+            dilation = dilation_base ** i  
+            blocks.append(
+                TCNResidualBlock(num_features=num_features, kernel_size=kernel_size, dilation=dilation, dropout=dropout)
+            )
+        
+        self.blocks = nn.Sequential(*blocks)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.blocks(inputs)
+
+class LSTMEncoder(nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        hidden_size: int = 256,
+        num_layers: int = 2,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        
+        self.lstm = nn.LSTM(
+            input_size=num_features,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            batch_first=False, 
+            bidirectional=True,
+        )
+        
+        self.projection = nn.Linear(hidden_size * 2, num_features)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        lstm_out, _ = self.lstm(inputs)  
+        out = self.projection(lstm_out)  
+        return out
+
+###Recurrent block with GRU
+
+class RNNLayer(nn.Module):
+    def __init__(self, in_size: int, hidden_size: int, num_layers:int, out_ll_size: int = 384):
+        super().__init__()
+        self.rnn = nn.GRU(input_size=in_size, hidden_size=hidden_size, num_layers=num_layers, bidirectional=True)
+        
+        self.norm = nn.LayerNorm(hidden_size * 2)  # bidirectional GRU doubles hidden size
+        
+        self.dropout = nn.Dropout(0.6)  # Increased dropout rate to 0.6
+        self.mid_layer = nn.Linear(hidden_size * 2, out_ll_size)
+        self.relu = nn.ReLU()
+        self.fc = nn.Linear(out_ll_size, charset().num_classes)
+        self.log_softmax = nn.LogSoftmax(dim=-1)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x shape: (T, N, in_size)
+        # x, _ = self.rnn(x)  # (T, N, hidden_size*2)
+        # x = self.fc(x)      # (T, N, num_classes)
+        #print(f'Input to RNN: {x.shape}')
+        x, _ = self.rnn(x)  
+        
+        
+        
+        """""
+        This part of the code is generated with the help of ChatGPT
+        """""
+        x = self.norm(x)
+        x = self.dropout(x)
+        
+        #print(f'Shape after GRU: {x.shape}') # (T, N, hidden_size*2)
+        #x = self.mid_layer(x) 
+        #print(f'Shape after mid layer: {x.shape}')              # (T, N, mid_layer_size)
+        x = self.relu(self.mid_layer(x))                # (T, N, mid_fc_size)
+        x = self.fc(x) 
+        #print(f'Shape before softmax: {x.shape}')          # (T, N, num_classes)  
+        return self.log_softmax(x)
+    
+
+
+class RNNBlock(nn.Module):
+    """A generic recurrent block capped with a LayerNorm
+    
+    Supports
+     - GRU or LSTM cells
+     - optional skip connection (skip connection will not help with vanishing gradients inside the block, only propogation through the block)
+     - optional dropout
+     - layer normalization
+     - optional bidirectionality (editor's note: if this model will ever be used to predict keystrokes based on live data, bidirectionality should not be used during training)
+
+    Inputs must be of shape (T, N, num_features).
+
+    Args:
+        num_features (int): Input and output feature dimension. If
+            ``hidden_size`` is not set, this is also used as the hidden size.
+        rnn_type (str): Type of RNN cell to use — supports "rnn", "gru", or "lstm".
+            (default: "rnn")
+        hidden_size (int | None): Hidden size of the RNN. If None, defaults
+            to ``num_features``. (default: None)
+        num_layers (int): Number of stacked RNN layers. (default: 1)
+        dropout (float): Dropout probability between RNN layers (only applies
+            when num_layers > 1). (default: 0.0)
+        bidirectional (bool): Whether to use a bidirectional RNN. Output is
+            projected back to ``num_features`` if True. (default: False) (I've never used this)
+        skip_connection (bool): Whether to add a residual connection around
+            the RNN to reduce vanishing gradient. (default: True)
+    """
+    def __init__(
+        self,
+        num_features: int,
+        rnn_type: str = "rnn",
+        hidden_size: int | None = None,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+        skip_connection: bool = True,
+    ) -> None:
+        super().__init__()
+        self.skip_connection = skip_connection
+        self.num_features = num_features
+        hidden_size = hidden_size or num_features
+
+        rnn_cls = {"rnn": nn.RNN, "gru": nn.GRU, "lstm": nn.LSTM}.get(rnn_type.lower())
+        assert rnn_cls is not None, f"Unsupported rnn_type: {rnn_type!r}. Use 'rnn', 'gru', or 'lstm'."
+
+        self.rnn = rnn_cls(
+            input_size=num_features,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0.0,
+            bidirectional=bidirectional,
+            batch_first=False,
+        )
+
+        rnn_out_size = hidden_size * (2 if bidirectional else 1)
+
+        self.proj = (
+            nn.Linear(rnn_out_size, num_features)
+            if rnn_out_size != num_features
+            else nn.Identity()
+        )
+
+        self.layer_norm = nn.LayerNorm(num_features)
+
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x, _ = self.rnn(inputs)   # (T, N, rnn_out_size)
+        x = self.proj(x)          # (T, N, num_features)
+        if self.skip_connection:
+            x = x + inputs        # skip connection
+        return self.layer_norm(x) # (T, N, num_features)
