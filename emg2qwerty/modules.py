@@ -411,3 +411,77 @@ class RNNLayer(nn.Module):
         x = self.fc(x) 
         #print(f'Shape before softmax: {x.shape}')          # (T, N, num_classes)  
         return self.log_softmax(x)
+    
+
+
+class RNNBlock(nn.Module):
+    """A generic recurrent block capped with a LayerNorm
+    
+    Supports
+     - GRU or LSTM cells
+     - optional skip connection (skip connection will not help with vanishing gradients inside the block, only propogation through the block)
+     - optional dropout
+     - layer normalization
+     - optional bidirectionality (editor's note: if this model will ever be used to predict keystrokes based on live data, bidirectionality should not be used during training)
+
+    Inputs must be of shape (T, N, num_features).
+
+    Args:
+        num_features (int): Input and output feature dimension. If
+            ``hidden_size`` is not set, this is also used as the hidden size.
+        rnn_type (str): Type of RNN cell to use — supports "rnn", "gru", or "lstm".
+            (default: "rnn")
+        hidden_size (int | None): Hidden size of the RNN. If None, defaults
+            to ``num_features``. (default: None)
+        num_layers (int): Number of stacked RNN layers. (default: 1)
+        dropout (float): Dropout probability between RNN layers (only applies
+            when num_layers > 1). (default: 0.0)
+        bidirectional (bool): Whether to use a bidirectional RNN. Output is
+            projected back to ``num_features`` if True. (default: False) (I've never used this)
+        skip_connection (bool): Whether to add a residual connection around
+            the RNN to reduce vanishing gradient. (default: True)
+    """
+    def __init__(
+        self,
+        num_features: int,
+        rnn_type: str = "rnn",
+        hidden_size: int | None = None,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+        skip_connection: bool = True,
+    ) -> None:
+        super().__init__()
+        self.skip_connection = skip_connection
+        self.num_features = num_features
+        hidden_size = hidden_size or num_features
+
+        rnn_cls = {"rnn": nn.RNN, "gru": nn.GRU, "lstm": nn.LSTM}.get(rnn_type.lower())
+        assert rnn_cls is not None, f"Unsupported rnn_type: {rnn_type!r}. Use 'rnn', 'gru', or 'lstm'."
+
+        self.rnn = rnn_cls(
+            input_size=num_features,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0.0,
+            bidirectional=bidirectional,
+            batch_first=False,
+        )
+
+        rnn_out_size = hidden_size * (2 if bidirectional else 1)
+
+        self.proj = (
+            nn.Linear(rnn_out_size, num_features)
+            if rnn_out_size != num_features
+            else nn.Identity()
+        )
+
+        self.layer_norm = nn.LayerNorm(num_features)
+
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x, _ = self.rnn(inputs)   # (T, N, rnn_out_size)
+        x = self.proj(x)          # (T, N, num_features)
+        if self.skip_connection:
+            x = x + inputs        
+        return self.layer_norm(x) # (T, N, num_features)
