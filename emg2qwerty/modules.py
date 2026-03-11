@@ -483,5 +483,5 @@ class RNNBlock(nn.Module):
         x, _ = self.rnn(inputs)   # (T, N, rnn_out_size)
         x = self.proj(x)          # (T, N, num_features)
         if self.skip_connection:
-            x = x + inputs        # skip connection
+            x = x + inputs        
         return self.layer_norm(x) # (T, N, num_features)
