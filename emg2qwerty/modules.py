@@ -355,6 +355,7 @@ class LSTMEncoder(nn.Module):
         hidden_size: int = 256,
         num_layers: int = 2,
         dropout: float = 0.2,
+        bidirectional: boolean = False
     ) -> None:
         super().__init__()
         
@@ -364,10 +365,10 @@ class LSTMEncoder(nn.Module):
             num_layers=num_layers,
             dropout=dropout,
             batch_first=False, 
-            bidirectional=True,
+            bidirectional=bidirectional,
         )
         
-        self.projection = nn.Linear(hidden_size * 2, num_features)
+        self.projection = nn.Linear(hidden_size * (2 if self.lstm.bidirectional else 1), num_features)
         
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         lstm_out, _ = self.lstm(inputs)  

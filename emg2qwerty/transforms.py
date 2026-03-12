@@ -243,3 +243,24 @@ class SpecAugment:
 
         # (..., C, freq, T) -> (T, ..., C, freq)
         return x.movedim(-1, 0)
+
+
+@dataclass
+class GaussianNoise:
+    """
+    Adds Gaussian noise a tensor
+    Intended to be used on training data after data normalization to increase generalizability
+
+    Returns identical dims to input
+
+    Args:
+        std_dev (float): Standard deviation of the Gaussian noise. (default: 0.1)
+    """
+
+    std_dev: float = 0.1
+
+    def __call__(self, specgram: torch.Tensor) -> torch.Tensor:
+        if self.std_dev > 0:
+            noise = torch.randn_like(specgram) * self.std_dev
+            return specgram + noise
+        return specgram
