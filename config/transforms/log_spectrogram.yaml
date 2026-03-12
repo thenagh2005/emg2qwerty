@@ -27,7 +27,7 @@ specaug:
 
 gaussian_noise:
   _target_: emg2qwerty.transforms.GaussianNoise
-  std: 0.1
+  std_dev: 0.1
 
 transforms:
   train:

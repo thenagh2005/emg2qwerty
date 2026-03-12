@@ -260,7 +260,7 @@ class GaussianNoise:
     std_dev: float = 0.1
 
     def __call__(self, specgram: torch.Tensor) -> torch.Tensor:
-        if self.std > 0:
-            noise = torch.randn_like(specgram) * self.std
+        if self.std_dev > 0:
+            noise = torch.randn_like(specgram) * self.std_dev
             return specgram + noise
         return specgram
