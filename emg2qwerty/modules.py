@@ -355,7 +355,7 @@ class LSTMEncoder(nn.Module):
         hidden_size: int = 256,
         num_layers: int = 2,
         dropout: float = 0.2,
-        bidirectional: boolean = False
+        bidirectional: bool = False
     ) -> None:
         super().__init__()
         
@@ -486,3 +486,73 @@ class RNNBlock(nn.Module):
         if self.skip_connection:
             x = x + inputs        
         return self.layer_norm(x) # (T, N, num_features)
+
+
+
+class TCNEncoder(nn.Module):    
+    def __init__(
+        self,
+        num_features: int,
+        num_blocks: int = 4,
+        kernel_size: int = 3,
+        dilation_base: int = 2,
+        dropout: float = 0.1,
+        
+    ) -> None:
+        super().__init__()
+        
+        blocks = []
+        for i in range(num_blocks):
+            dilation = dilation_base ** i  
+            blocks.append(
+                TCNResidualBlock(num_features=num_features, kernel_size=kernel_size, dilation=dilation, dropout=dropout)
+            )
+        
+        self.blocks = nn.Sequential(*blocks)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.blocks(inputs)
+
+class HailMaryLSTMBlock(nn.Module):
+    
+    """
+    Our last attempt at making the most effective model possible on one patient's data. 
+
+    Note for anyone iterating on this code (which would be unexpected) that the arguments are hardcoded into this module, not in a config file, since it is not expected to run this model more than once.
+
+    A 6 layer bidirectional LSTM with
+     - layer normalization
+     - dropout of 0.1
+     - bidirectionality
+     - skip connection
+    
+    Inputs must be of shape (T, N, num_features).
+    """
+    def __init__(
+        self,
+        num_features: int,
+        hidden_size: int = 256,
+        num_layers: int = 6,
+        dropout: float = 0.1,
+        bidirectional: bool = True,
+        
+    ) -> None:
+        super().__init__()
+        self.lstm = nn.LSTM(...)
+        
+        self.lstm = nn.LSTM(
+            input_size=num_features,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            batch_first=False, 
+            bidirectional=bidirectional,
+        )
+        
+        self.projection = nn.Linear(hidden_size * (2 if self.lstm.bidirectional else 1), num_features)
+        self.layer_norm = nn.LayerNorm(num_features)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        lstm_out, _ = self.lstm(inputs)  #
+        x = self.projection(lstm_out) + inputs        # Skip connection
+        return self.layer_norm(x) # Layer Normalization
