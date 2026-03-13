@@ -532,14 +532,13 @@ class HailMaryLSTMBlock(nn.Module):
         self,
         num_features: int,
         hidden_size: int = 256,
-        num_layers: int = 6,
-        dropout: float = 0.1,
+        num_layers: int = 4,
+        dropout: float = 0.05,
         bidirectional: bool = True,
         
     ) -> None:
         super().__init__()
-        self.lstm = nn.LSTM(...)
-        
+                
         self.lstm = nn.LSTM(
             input_size=num_features,
             hidden_size=hidden_size,
