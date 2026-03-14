@@ -397,11 +397,6 @@ class RNNLayer(nn.Module):
         #print(f'Input to RNN: {x.shape}')
         x, _ = self.rnn(x)  
         
-        
-        
-        """""
-        This part of the code is generated with the help of ChatGPT
-        """""
         x = self.norm(x)
         x = self.dropout(x)
         

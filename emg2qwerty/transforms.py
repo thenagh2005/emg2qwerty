@@ -264,3 +264,15 @@ class GaussianNoise:
             noise = torch.randn_like(specgram) * self.std_dev
             return specgram + noise
         return specgram
+
+@dataclass
+class DownSample:
+    """Downsample input signal"""
+    
+    factor: int = 1
+    
+    def __post_init__(self) -> None:
+        assert self.factor >= 1
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor[:: self.factor]
